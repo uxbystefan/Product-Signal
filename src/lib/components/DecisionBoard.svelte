@@ -1,11 +1,16 @@
 <script lang="ts">
 	import { fly, fade } from 'svelte/transition';
+	import type { SupabaseClient, User } from '@supabase/supabase-js';
+
+	let { supabase, user }: { supabase: SupabaseClient; user: User | null } = $props();
 
 	let problem = $state('');
 	let assumptions = $state<string[]>(['']);
 	let evidence = $state('');
 	let options = $state<string[]>(['']);
 	let decision = $state('');
+	let saving = $state(false);
+	let message = $state('');
 
 	function addAssumption() {
 		assumptions = [...assumptions, ''];
@@ -22,9 +27,60 @@
 	function removeOption(index: number) {
 		options = options.filter((_, i) => i !== index);
 	}
+
+	async function saveBoard() {
+		saving = true;
+		message = '';
+
+		// 1. Insert into decision_boards
+		const { data: board, error: boardError } = await supabase
+			.from('decision_boards')
+			.insert({ problem, evidence, decision, user_id: user?.id })
+			.select()
+			.single();
+
+		if (boardError) {
+			message = 'Error saving board: ' + boardError.message;
+			saving = false;
+			return;
+		}
+
+		const boardId = board.id;
+
+		// 2. Insert assumptions (filter out empty ones)
+		const nonEmptyAssumptions = assumptions.filter((a) => a.trim());
+		if (nonEmptyAssumptions.length > 0) {
+			const { error: assError } = await supabase
+				.from('assumptions')
+				.insert(nonEmptyAssumptions.map((content) => ({ board_id: boardId, content })));
+
+			if (assError) {
+				message = 'Board saved but error saving assumptions: ' + assError.message;
+				saving = false;
+				return;
+			}
+		}
+
+		// 3. Insert options (filter out empty ones)
+		const nonEmptyOptions = options.filter((o) => o.trim());
+		if (nonEmptyOptions.length > 0) {
+			const { error: optError } = await supabase
+				.from('options')
+				.insert(nonEmptyOptions.map((content) => ({ board_id: boardId, content })));
+
+			if (optError) {
+				message = 'Board saved but error saving options: ' + optError.message;
+				saving = false;
+				return;
+			}
+		}
+
+		message = 'Decision saved successfully!';
+		saving = false;
+	}
 </script>
 
-<div class="mx-auto max-w-[800px] px-4 py-16">
+<div class="mx-auto max-w-2xl px-4 py-16">
 	<h1 class="mb-10 text-3xl font-semibold tracking-tight text-text">Decision Board</h1>
 
 	<div class="flex flex-col gap-6">
@@ -127,5 +183,18 @@
 				class="w-full resize-none rounded-xl border border-border bg-bg px-4 py-3 text-sm text-text placeholder-text-secondary outline-none transition-shadow focus:ring-2 focus:ring-primary-soft focus:border-primary"
 			></textarea>
 		</section>
+	</div>
+
+	<div class="flex items-center justify-end gap-4 mt-8">
+		{#if message}
+			<p class="text-sm" class:text-green-600={message.includes('successfully')} class:text-red-500={!message.includes('successfully')}>{message}</p>
+		{/if}
+		<button
+			onclick={saveBoard}
+			disabled={saving}
+			class="rounded-lg bg-primary px-6 py-2 text-white font-semibold shadow hover:bg-primary-dark transition-colors disabled:opacity-50"
+		>
+			{saving ? 'Saving...' : 'Save Decision'}
+		</button>
 	</div>
 </div>

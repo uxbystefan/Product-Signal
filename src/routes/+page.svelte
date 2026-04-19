@@ -1,5 +1,7 @@
 <script lang="ts">
 	import DecisionBoard from '$lib/components/DecisionBoard.svelte';
+
+	let { data } = $props();
 </script>
 
 <svelte:head>
@@ -7,5 +9,5 @@
 </svelte:head>
 
 <div class="min-h-screen bg-bg">
-	<DecisionBoard />
+	<DecisionBoard supabase={data.supabase} user={data.user} />
 </div>
