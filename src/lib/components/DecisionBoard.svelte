@@ -5,27 +5,50 @@
 	let { supabase, user }: { supabase: SupabaseClient; user: User | null } = $props();
 
 	let problem = $state('');
-	let assumptions = $state<string[]>(['']);
+	let assumptions = $state<string[]>(['', '', '']);
 	let evidence = $state('');
-	let options = $state<string[]>(['']);
+	let options = $state<string[]>(['', '', '']);
 	let decision = $state('');
 	let saving = $state(false);
 	let message = $state('');
+	let evaluation = $state<{ score: number; level: string; feedback: string[] } | null>(null);
+
+	function evaluateBoard() {
+		let score = 0;
+		const feedback: string[] = [];
+
+		if (problem.trim().length > 20) score++;
+		else feedback.push('Problem is unclear');
+
+		const filledAssumptions = assumptions.filter((a) => a.trim()).length;
+		if (filledAssumptions >= 2) score++;
+		else feedback.push('Add more assumptions');
+
+		if (evidence.trim().length > 20) score++;
+		else feedback.push('Evidence is weak');
+
+		if (decision.trim().length > 20) score++;
+		else feedback.push('Decision is not clearly defined');
+
+		const level = score <= 1 ? 'Weak' : score <= 3 ? 'Medium' : 'Strong';
+
+		return { score, level, feedback };
+	}
 
 	function addAssumption() {
-		assumptions = [...assumptions, ''];
+		if (assumptions.length < 5) assumptions = [...assumptions, ''];
 	}
 
 	function removeAssumption(index: number) {
-		assumptions = assumptions.filter((_, i) => i !== index);
+		if (assumptions.length > 3) assumptions = assumptions.filter((_, i) => i !== index);
 	}
 
 	function addOption() {
-		options = [...options, ''];
+		if (options.length < 5) options = [...options, ''];
 	}
 
 	function removeOption(index: number) {
-		options = options.filter((_, i) => i !== index);
+		if (options.length > 3) options = options.filter((_, i) => i !== index);
 	}
 
 	async function saveBoard() {
@@ -76,6 +99,7 @@
 		}
 
 		message = 'Decision saved successfully!';
+		evaluation = evaluateBoard();
 		saving = false;
 	}
 </script>
@@ -87,6 +111,7 @@
 		<!-- Problem -->
 		<section class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
 			<label for="problem" class="mb-2 block text-sm font-medium text-text">Problem</label>
+			<p class="mb-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-text-secondary">Are we solving the right problem?</p>
 			<textarea
 				id="problem"
 				bind:value={problem}
@@ -99,6 +124,7 @@
 		<!-- Assumptions -->
 		<section class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
 			<p class="mb-2 text-sm font-medium text-text">Assumptions</p>
+			<p class="mb-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-text-secondary">What assumption, if wrong, breaks this?</p>
 			<div class="flex flex-col gap-2">
 				{#each assumptions as assumption, i (i)}
 					<div class="flex items-center gap-2" transition:fly={{ y: -8, duration: 200 }}>
@@ -108,7 +134,7 @@
 							placeholder="What do we believe is true?"
 							class="flex-1 rounded-xl border border-border bg-bg px-4 py-2.5 text-sm text-text placeholder-text-secondary outline-none transition-shadow focus:ring-2 focus:ring-primary-soft focus:border-primary"
 						/>
-						{#if assumptions.length > 1}
+						{#if assumptions.length > 3}
 							<button
 								onclick={() => removeAssumption(i)}
 								class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary-soft hover:text-primary"
@@ -122,7 +148,8 @@
 			</div>
 			<button
 				onclick={addAssumption}
-				class="mt-3 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+				disabled={assumptions.length >= 5}
+				class="mt-3 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-40"
 			>
 				+ Add assumption
 			</button>
@@ -131,6 +158,7 @@
 		<!-- Evidence -->
 		<section class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
 			<label for="evidence" class="mb-2 block text-sm font-medium text-text">Evidence</label>
+			<p class="mb-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-text-secondary">What evidence do we actually have?</p>
 			<textarea
 				id="evidence"
 				bind:value={evidence}
@@ -152,7 +180,7 @@
 							placeholder="What paths can we take?"
 							class="flex-1 rounded-xl border border-border bg-bg px-4 py-2.5 text-sm text-text placeholder-text-secondary outline-none transition-shadow focus:ring-2 focus:ring-primary-soft focus:border-primary"
 						/>
-						{#if options.length > 1}
+						{#if options.length > 3}
 							<button
 								onclick={() => removeOption(i)}
 								class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary-soft hover:text-primary"
@@ -166,7 +194,8 @@
 			</div>
 			<button
 				onclick={addOption}
-				class="mt-3 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+				disabled={options.length >= 5}
+				class="mt-3 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-40"
 			>
 				+ Add option
 			</button>
@@ -175,6 +204,7 @@
 		<!-- Decision -->
 		<section class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
 			<label for="decision" class="mb-2 block text-sm font-medium text-text">Decision</label>
+			<p class="mb-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-text-secondary">What are we avoiding deciding?</p>
 			<textarea
 				id="decision"
 				bind:value={decision}
@@ -197,4 +227,22 @@
 			{saving ? 'Saving...' : 'Save Decision'}
 		</button>
 	</div>
+
+	{#if evaluation}
+		<div class="mt-6 rounded-2xl border border-border bg-surface p-6 shadow-sm" transition:fade={{ duration: 200 }}>
+			<div class="flex items-center gap-2">
+				<h2 class="text-sm font-semibold text-text">Clarity:</h2>
+				<span class="rounded-lg px-2.5 py-1 text-xs font-medium {evaluation.level === 'Strong' ? 'bg-blue-100 text-blue-700' : evaluation.level === 'Medium' ? 'bg-primary-soft text-primary' : 'bg-gray-100 text-text-secondary'}">
+					{evaluation.level}
+				</span>
+			</div>
+			{#if evaluation.feedback.length > 0}
+				<ul class="mt-3 flex flex-col gap-1">
+					{#each evaluation.feedback as item}
+						<li class="text-sm text-text-secondary">• {item}</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
+	{/if}
 </div>
