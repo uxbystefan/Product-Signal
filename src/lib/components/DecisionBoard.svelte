@@ -9,10 +9,13 @@
 		risk: string;
 	}
 
-		interface FeedbackItem {
-			issue: string;
-			action: string;
-		}
+	type FeedbackPriority = 'high' | 'medium' | 'low';
+
+	interface FeedbackItem {
+		issue: string;
+		action: string;
+		priority: FeedbackPriority;
+	}
 
 	let { supabase, user }: { supabase: SupabaseClient; user: User | null } = $props();
 
@@ -35,12 +38,18 @@
 	function evaluateBoard() {
 		let score = 0;
 		const feedback: FeedbackItem[] = [];
+		const priorityRank: Record<FeedbackPriority, number> = {
+			high: 0,
+			medium: 1,
+			low: 2
+		};
 
 		if (problem.trim().length > 20) score++;
 		else
 			feedback.push({
 				issue: 'Problem is unclear',
-				action: 'Define the problem in one clear, specific sentence'
+				action: 'Define the problem in one clear, specific sentence',
+				priority: 'high'
 			});
 
 		const filledAssumptions = assumptions.filter((a) => a.text.trim()).length;
@@ -48,24 +57,32 @@
 		else
 			feedback.push({
 				issue: 'Not enough assumptions',
-				action: 'List 2-3 key assumptions behind this decision'
+				action: 'List 2-3 key assumptions behind this decision',
+				priority: 'medium'
 			});
 
 		if (evidence.trim().length > 20) score++;
 		else
 			feedback.push({
 				issue: 'Evidence is weak',
-				action: 'Add user quotes, data points, or repeated patterns'
+				action: 'Add user quotes, data points, or repeated patterns',
+				priority: 'medium'
 			});
 
 		if (decision.trim().length > 20) score++;
 		else
 			feedback.push({
 				issue: 'Decision is unclear',
-				action: 'State exactly what you are choosing and why'
+				action: 'State exactly what you are choosing and why',
+				priority: 'high'
 			});
 
-		return { score, feedback };
+		const prioritizedFeedback = feedback
+			.filter((item) => item.priority !== 'low')
+			.sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority])
+			.slice(0, 3);
+
+		return { score, feedback: prioritizedFeedback };
 	}
 
 	function clarityLevel(score: number) {
@@ -405,20 +422,25 @@ ${riskSummary || 'No risks documented'}`;
 					{clarityLevel(evaluation.score)}
 				</span>
 			</div>
-			<p class="mt-3 text-sm text-text">Before moving forward:</p>
-			<p class="mt-1 text-sm text-text-secondary">To strengthen this decision:</p>
 			{#if evaluation.feedback.length > 0}
-				<h3 class="mt-4 text-sm font-medium text-text">Next steps to improve clarity:</h3>
-				<ul class="mt-3 flex flex-col gap-3">
-					{#each evaluation.feedback.slice(0, 3) as item}
+				<p class="mt-3 text-sm font-medium text-text">Before moving forward:</p>
+				<p class="mt-1 text-xs text-text-secondary" style="color: #6B7280;">Focus on these first - improving them will increase clarity the most.</p>
+				{#if evaluation.score <= 1}
+					<p class="mt-3 text-sm text-text">This decision lacks a clear foundation. Start here:</p>
+				{/if}
+				<ul class="mt-4 flex flex-col gap-4">
+					{#each evaluation.feedback as item}
 						<li>
 							<p class="text-sm text-text">{item.issue}</p>
-							<p class="text-xs text-text-secondary">-> {item.action}</p>
+							<p class="mt-1 text-xs text-text-secondary">-> {item.action}</p>
 						</li>
 					{/each}
 				</ul>
 			{:else}
-				<p class="mt-4 text-sm text-text-secondary">Clarity is strong. Keep validating with real-world evidence as you execute.</p>
+				<p class="mt-4 text-sm font-semibold text-text">Clarity: Strong</p>
+				<p class="mt-2 text-sm text-text">This decision is clear and well-supported.</p>
+				<p class="mt-1 text-sm text-text-secondary">Continue validating with real-world evidence as you execute.</p>
+				<p class="mt-3 text-xs text-text-secondary">No critical issues detected.</p>
 			{/if}
 		</div>
 	{/if}
