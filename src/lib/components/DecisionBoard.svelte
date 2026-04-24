@@ -9,12 +9,15 @@
 		risk: string;
 	}
 
-	type FeedbackPriority = 'high' | 'medium' | 'low';
+	type FeedbackPriority = 'high' | 'medium';
+	type FeedbackSeverity = 'critical' | 'improvement';
 
 	interface FeedbackItem {
 		issue: string;
 		action: string;
 		priority: FeedbackPriority;
+		severity: FeedbackSeverity;
+		category: 'problem-clarity' | 'assumptions' | 'evidence-support' | 'decision-clarity';
 	}
 
 	let { supabase, user }: { supabase: SupabaseClient; user: User | null } = $props();
@@ -34,52 +37,169 @@
 	let saving = $state(false);
 	let message = $state('');
 	let evaluation = $state<{ score: number; feedback: FeedbackItem[] } | null>(null);
+	let actionRotation = $state<Record<string, number>>({});
+
+	const severityRank: Record<FeedbackSeverity, number> = {
+		critical: 0,
+		improvement: 1
+	};
+
+	const priorityRank: Record<FeedbackPriority, number> = {
+		high: 0,
+		medium: 1
+	};
+
+	function nextAction(actionKey: string, variations: string[]) {
+		const currentIndex = actionRotation[actionKey] ?? 0;
+		actionRotation = { ...actionRotation, [actionKey]: currentIndex + 1 };
+		return variations[currentIndex % variations.length];
+	}
 
 	function evaluateBoard() {
 		let score = 0;
-		const feedback: FeedbackItem[] = [];
-		const priorityRank: Record<FeedbackPriority, number> = {
-			high: 0,
-			medium: 1,
-			low: 2
-		};
+		const feedbackByCategory = new Map<FeedbackItem['category'], FeedbackItem>();
 
-		if (problem.trim().length > 20) score++;
+		function upsertFeedback(item: FeedbackItem) {
+			const current = feedbackByCategory.get(item.category);
+			if (!current) {
+				feedbackByCategory.set(item.category, item);
+				return;
+			}
+
+			const currentSeverity = severityRank[current.severity];
+			const incomingSeverity = severityRank[item.severity];
+			if (incomingSeverity < currentSeverity) {
+				feedbackByCategory.set(item.category, item);
+				return;
+			}
+
+			const currentPriority = priorityRank[current.priority];
+			const incomingPriority = priorityRank[item.priority];
+			if (incomingPriority < currentPriority) {
+				feedbackByCategory.set(item.category, item);
+			}
+		}
+
+		const hasProblem = problem.trim().length > 20;
+		const hasDecision = decision.trim().length > 20;
+		const hasEvidence = evidence.trim().length > 20;
+
+		const nonEmptyAssumptions = assumptions.filter((a) => a.text.trim());
+		const hasAssumptions = nonEmptyAssumptions.length > 0;
+		const hasStrongAssumptions = nonEmptyAssumptions.length >= 2;
+		const hasAssumptionTests = nonEmptyAssumptions.some((a) => a.test.trim().length > 0);
+		const hasAssumptionRisks = nonEmptyAssumptions.some((a) => a.risk.trim().length > 0);
+
+		if (hasProblem) score++;
 		else
-			feedback.push({
-				issue: 'Problem is unclear',
-				action: 'Define the problem in one clear, specific sentence',
-				priority: 'high'
+			upsertFeedback({
+				issue: 'The problem statement is still unclear',
+				action: nextAction('problem-unclear', [
+					'Define the problem in one specific sentence, including who is affected',
+					'Clarify the exact user outcome that is currently failing',
+					'Reframe this as a concrete problem with scope and impact'
+				]),
+				priority: 'high',
+				severity: 'critical',
+				category: 'problem-clarity'
 			});
 
-		const filledAssumptions = assumptions.filter((a) => a.text.trim()).length;
-		if (filledAssumptions >= 2) score++;
+		if (hasStrongAssumptions) score++;
 		else
-			feedback.push({
-				issue: 'Not enough assumptions',
-				action: 'List 2-3 key assumptions behind this decision',
-				priority: 'medium'
+			upsertFeedback({
+				issue: 'Key assumptions are underdefined',
+				action: nextAction('assumptions-weak', [
+					'Define the key assumptions this decision depends on',
+					'Identify the 2-3 assumptions that would invalidate this decision if wrong',
+					'Make the core assumptions explicit before moving forward'
+				]),
+				priority: 'medium',
+				severity: 'improvement',
+				category: 'assumptions'
 			});
 
-		if (evidence.trim().length > 20) score++;
+		if (hasEvidence) score++;
+
+		if (hasDecision) score++;
 		else
-			feedback.push({
-				issue: 'Evidence is weak',
-				action: 'Add user quotes, data points, or repeated patterns',
-				priority: 'medium'
+			upsertFeedback({
+				issue: 'The decision is still unclear',
+				action: nextAction('decision-unclear', [
+					'State the decision clearly, including what will happen next',
+					'Define one clear direction and the tradeoff being accepted',
+					'Write the final decision as an explicit commitment'
+				]),
+				priority: 'high',
+				severity: 'critical',
+				category: 'decision-clarity'
 			});
 
-		if (decision.trim().length > 20) score++;
-		else
-			feedback.push({
-				issue: 'Decision is unclear',
-				action: 'State exactly what you are choosing and why',
-				priority: 'high'
+		if (hasAssumptions && !hasAssumptionTests)
+			upsertFeedback({
+				issue: 'Assumptions are not yet validated',
+				action: nextAction('assumptions-no-test', [
+					'Define how each key assumption will be tested',
+					'Attach a concrete validation method to each major assumption',
+					'Specify what evidence would confirm or invalidate each assumption'
+				]),
+				priority: 'high',
+				severity: 'improvement',
+				category: 'assumptions'
 			});
 
-		const prioritizedFeedback = feedback
-			.filter((item) => item.priority !== 'low')
-			.sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority])
+		if (hasDecision && !hasEvidence)
+			upsertFeedback({
+				issue: 'This decision is not supported by strong evidence',
+				action: 'Add concrete user signals such as quotes, metrics, or repeated behavior patterns',
+				priority: 'high',
+				severity: 'critical',
+				category: 'evidence-support'
+			});
+		else if (!hasDecision && !hasEvidence)
+			upsertFeedback({
+				issue: 'Evidence is still too weak to support a decision',
+				action: nextAction('evidence-weak-no-decision', [
+					'Add concrete user signals such as quotes, metrics, or repeated behavior patterns',
+					'Include observed behavior that clarifies what decision should be made',
+					'Bring in specific user or market evidence before deciding'
+				]),
+				priority: 'medium',
+				severity: 'improvement',
+				category: 'evidence-support'
+			});
+
+		if (hasEvidence && !hasDecision)
+			upsertFeedback({
+				issue: 'Evidence has not been translated into a decision',
+				action: nextAction('evidence-no-decision', [
+					'Use the evidence to define a clear direction',
+					'Convert the strongest evidence into a specific decision',
+					'Derive one explicit decision from the current evidence'
+				]),
+				priority: 'high',
+				severity: 'critical',
+				category: 'decision-clarity'
+			});
+
+		if (hasAssumptions && !hasAssumptionRisks)
+			upsertFeedback({
+				issue: 'Risks are not yet considered',
+				action: nextAction('assumptions-no-risk', [
+					'Define what happens if the key assumptions are wrong',
+					'Document the downside scenario for each critical assumption',
+					'Clarify the primary risk if this assumption set fails'
+				]),
+				priority: 'medium',
+				severity: 'improvement',
+				category: 'assumptions'
+			});
+
+		const prioritizedFeedback = Array.from(feedbackByCategory.values())
+			.sort((a, b) => {
+				const severityDiff = severityRank[a.severity] - severityRank[b.severity];
+				if (severityDiff !== 0) return severityDiff;
+				return priorityRank[a.priority] - priorityRank[b.priority];
+			})
 			.slice(0, 3);
 
 		return { score, feedback: prioritizedFeedback };
@@ -423,16 +543,18 @@ ${riskSummary || 'No risks documented'}`;
 				</span>
 			</div>
 			{#if evaluation.feedback.length > 0}
-				<p class="mt-3 text-sm font-medium text-text">Before moving forward:</p>
-				<p class="mt-1 text-xs text-text-secondary" style="color: #6B7280;">Focus on these first - improving them will increase clarity the most.</p>
-				{#if evaluation.score <= 1}
-					<p class="mt-3 text-sm text-text">This decision lacks a clear foundation. Start here:</p>
-				{/if}
+				<p class="mt-3 text-sm font-medium text-text">Decision review</p>
+				<p class="mt-1 text-xs text-text-secondary">Focus on these first to strengthen this decision.</p>
 				<ul class="mt-4 flex flex-col gap-4">
 					{#each evaluation.feedback as item}
-						<li>
-							<p class="text-sm text-text">{item.issue}</p>
-							<p class="mt-1 text-xs text-text-secondary">-> {item.action}</p>
+						<li class="rounded-lg border border-border bg-bg px-3 py-3">
+							<div class="flex items-center justify-between gap-3">
+								<p class="text-sm {item.severity === 'critical' ? 'font-semibold text-text' : 'font-medium text-text'}">{item.issue}</p>
+								<span class="rounded-md border px-2 py-0.5 text-[11px] uppercase tracking-wide {item.severity === 'critical' ? 'border-red-200 text-red-700 bg-red-50/50' : 'border-border text-text-secondary bg-surface'}">
+									{item.severity === 'critical' ? 'Critical' : 'Improve'}
+								</span>
+							</div>
+							<p class="mt-2 text-xs text-text-secondary">-> {item.action}</p>
 						</li>
 					{/each}
 				</ul>
@@ -440,7 +562,6 @@ ${riskSummary || 'No risks documented'}`;
 				<p class="mt-4 text-sm font-semibold text-text">Clarity: Strong</p>
 				<p class="mt-2 text-sm text-text">This decision is clear and well-supported.</p>
 				<p class="mt-1 text-sm text-text-secondary">Continue validating with real-world evidence as you execute.</p>
-				<p class="mt-3 text-xs text-text-secondary">No critical issues detected.</p>
 			{/if}
 		</div>
 	{/if}
