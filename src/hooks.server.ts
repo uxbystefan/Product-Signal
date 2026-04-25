@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
-import { redirect, type Handle } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.supabase = createServerClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -34,14 +34,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 		return { session, user };
 	};
-
-	// Auth guard: redirect unauthenticated users away from protected routes
-	if (!event.url.pathname.startsWith('/auth')) {
-		const { session } = await event.locals.safeGetSession();
-		if (!session) {
-			redirect(303, '/auth');
-		}
-	}
 
 	return resolve(event, {
 		filterSerializedResponseHeaders(name) {
